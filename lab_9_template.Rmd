@@ -42,10 +42,12 @@ library(stargazer)
 
 # a. Read in data as 'homes':
 
+homes <- read_csv("slo_homes.csv")
 
 # b. Filter to only include cities "San Luis Obispo", "Santa Maria-Orcutt", "Atascadero", and "Arroyo Grande", and call this new subset 'homes_sub':
 
-
+homes_sub <- homes %>% 
+  filter(City == "Arroyo Grande" | City == "San Luis Obispo" | City == "Atascadero" |City == "Santa Maria-Orcutt")
 
 ```
 
@@ -89,6 +91,9 @@ by_sqft
 
 # Observations here: Does relationship appear ~ linear? Anything else we can pick out re: trends, outliers, etc.? What is the general trend? Any outliers? Is there reason enough for us to omit it?
 
+
+# Linear relationship appears to exist between continuous variable input (square foot) and continuous variable output (housing price)
+
 ```
 
 ###4. Multiple linear regression
@@ -97,6 +102,7 @@ Multiple linear regression in R follows the same syntax we've been using so far:
 
     lm(y ~ x1 + x2 + x3..., data = df_name)
     
+Goal is to describe the price of a house based on a series of predictor variables.
 Let's try this model a couple of different ways: 
 
 (1) Use all available variables (saturated model) 
@@ -108,9 +114,17 @@ Use summary() to view the model output and statistics.
 
 # a. Saturated model: 
 
+homes_lm1 <- lm(Price ~ City + Bedrooms + Bathrooms + SqFt + PricePerSqFt + Status, data = homes_sub)
+
+# THIS IS BAD - Price per Sqft is a variable that is calculated from the dependent variable price and this can lead to biased overfitting of model results.
 
 # b. Model summary:
 
+summary(homes_lm1)
+
+# Reference levels: Status - Foreclosure; City - Arroyo Grande  
+# Colinearity - if multiple variables exist in a model and they are highly correlated then including all of them doesn't make sense. (Ex - bedrooms/bathrooms/square-feet)
+# Colinearity can really mess with your coefficients so if you're model doesn't make that much sense look for these. 
 ```
 
 The next model: Exclude price per square foot, and bedrooms/bathrooms (since these are largely explained by square footage...)
@@ -119,9 +133,23 @@ The next model: Exclude price per square foot, and bedrooms/bathrooms (since the
 
 # a. Updated model with variables City, SqFt, and Status:
 
+homes_lm2 <- lm(Price ~ City + SqFt + Status, data = homes_sub)
+
 # b. Model summary:
 
+summary(homes_lm2)
+
+# p-values for each coefficient are telling us if that variable is a significant predictor of housing price --> Exs: StatusShortSale = 0.9447 (not a significant predictor), StatusRegular <0.001 (is a significant predictor)
+
+# Adjusted R2 = 0.5268 (use when doing multiple linear regression) 
+
+# model p-value < 0.001 --> says this model significantly predicts housing prices 
+
 ```
+*Interpretation Examples:*  
+All else being equal, a house in SLO would be expected to sell, on average, for $34525.40 more than a house in Arroyo Grande.   
+
+For every 1 sqft increase in housing size, we would expect the price of a house to go up by $245.90, if all other variables are equal.  
 
 Wait...but what if I wanted everything to be with respect to a Regular sale status? Then I need to change my factor levels. We've done this before, here we'll use a different function (fct_relevel) from *forcats* package in the tidyverse. 
 
@@ -129,19 +157,28 @@ Wait...but what if I wanted everything to be with respect to a Regular sale stat
 
 # a. Set Status to class 'factor'
 
+homes_sub$Status <- factor(homes_sub$Status)
 
 # b. Check to ensure it's a factor now
-
+# Use class() in the console to check that it's a factor
 
 # c. Check levels:
 
+levels(homes_sub$Status)
 
 # d. Reassign reference level of "Status" to "Regular":
 
+homes_sub$Status <- fct_relevel(homes_sub$Status, "Regular")
+
+# Recheck the levels to ensure that the reference level was reassigned (should be listed first)
+
+levels(homes_sub$Status)
 
 # e. Now run the regression again - same equation, but now the reference level is different (Status = Regular): 
 
+homes_lm3 <- lm(Price ~ City + SqFt + Status, data = homes_sub)
 
+summary(homes_lm3)
 
 ```
 
@@ -157,7 +194,15 @@ Then we can evaluate model diagnostics using the plot() function:
 ```{r diagnostics}
 
 # a. Model diagnostics:
+plot(homes_lm3)
 
+#Notes on model diagnostics:  
+
+# Residuals vs. Fitted - generally evenly distributed vertically around the line; definitely are a few outliers but that isn't reason enough not to include them. (satisfied)  
+
+#QQ Plot - Following a very normal residual distribution, generally (satisfied)
+
+# Overall, heterodascitity is oK, residuals normality definitey looks good, and conceptually and mathematically my model makes sense!
 ```
 
 ###6. Model comparison by Akaike Information Criterion
@@ -168,7 +213,15 @@ The AIC is a quantitative metric for model "optimization" that balances complexi
 
 # a. AIC values for each model
 
+# Find saturated model AIC
+sat_aic <- AIC(homes_lm1)
+
+# Find final model AIC
+final_aic <- AIC(homes_lm3)
+
 # Answer: which would you pick? 
+# While the absolute AIC value is lower for model 1, I would still pick model 3 (homes_lm3) because conceptually this makes sense with what I know about the variables and I know that heterodasciticity and normality are met. 
+
 
 ```
 
@@ -178,7 +231,9 @@ The AIC is a quantitative metric for model "optimization" that balances complexi
 
 # a. Prepare a nice regression table:
 
+#once models are created all you have to do is list the model names in stargazer()
 
+lm_table <- stargazer(homes_lm1, homes_lm3, type = "html")
 
 # Note: If you want to work with this in Word, save to html, open, copy and paste into Word. 
 
@@ -222,6 +277,7 @@ df_new <- data.frame(City = rep(c("San Luis Obispo",
                                   times = 12, 
                                   each = 20))
 
+# Looks at 60 observations from each city, on sequence of sqft between 500 and 3500 by 20 ft, and each status 20 times (times = 12 to match the number of sqft predictions) 
 ```
 
 Make predictions for the new data using predict():
@@ -229,10 +285,14 @@ Make predictions for the new data using predict():
 ```{r predict}
 
 # a. Make predictions using the new data frame:
+# se.fit includes standard error for mean price and interval = gives a confidence interval for the mean price
+
+price_predict <- predict(homes_lm3, newdata = df_new, se.fit = TRUE, interval = "confidence")
 
 # b. Bind predictions to the data to make it actually useful:
+# data.frame combines by column as long as they have the same number of rows.
 
-
+predict_df <- data.frame(df_new, price_predict)
 
 ```
 
@@ -242,7 +302,11 @@ Then visualize it!
 
 # Create a line graph with square footage on the x-axis, predicted price on y-axis, with color dependent on City and facet_wrapped by sale status (follow along):
 
+predict_graph <- ggplot(predict_df, aes(x = SqFt, y = fit.fit)) +
+  geom_line(aes(color = City)) +
+  facet_wrap(~ Status)
 
+predict_graph
 ```
 
 END LAB
